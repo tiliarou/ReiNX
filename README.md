@@ -9,7 +9,7 @@ Put `ReiNX` folder on the root of your switch's SD card and run `ReiNX.bin` with
 
 **Compiling:**
 
-You'll need devkitpro with devkitA64 and run `make`
+You'll need devkitpro with devkitARM and run `make`
 
 
 **Features:**
@@ -18,7 +18,7 @@ You'll need devkitpro with devkitA64 and run `make`
 
 * Optional custom kernel/secmon/warmboot
 
-* Default kips with exefs redir from `/ReiNX/title/{tid}`
+* Default kips with exefs redir from `/ReiNX/titles/{tid}`
 
 
 **Credits:**
