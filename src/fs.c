@@ -41,8 +41,10 @@ u32 sd_mount() {
 }
 
 u32 fopen(const char *path, const char *mode) {
-    if (f_open(&fp, path, mode[0] == 'w' ? FA_WRITE : FA_READ) != FR_OK) 
-        return NULL;
+    u32 m = (mode[0] == 0x77 ? (FA_WRITE|FA_CREATE_NEW) : FA_READ);
+    print("%kpath=%s;\tmode=%d\n%k", 0xFFF442DC, path, m, ORANGE);
+    if (f_open(&fp, path, m) != FR_OK) 
+        return 0;
     return 1;
 }
 
@@ -52,7 +54,7 @@ u32 fread(void *buf, size_t size, size_t ntimes) {
         u32 rsize = MIN(ntimes * size, size);
         if (f_read(&fp, ptr, rsize, NULL) != FR_OK) {
             error("Failed read!\n");
-            return NULL;
+            return 0;
         }
 
         ptr += rsize;
@@ -67,7 +69,7 @@ u32 fwrite(void *buf, size_t size, size_t ntimes) {
         u32 rsize = MIN(ntimes * size, size);
         if (f_write(&fp, ptr, rsize, NULL) != FR_OK) {
             error("Failed write!\n");
-            return NULL;
+            return 0;
         }
 
         ptr += rsize;
@@ -100,12 +102,16 @@ size_t enumerateDir(char ***output, char *path, char *pattern) {
     strcpy(pathb, path);
     pathb[pathlen] = '/';
 
-    int i; for (i = 0; fno.fname[0] != 0 && fr == FR_OK; i++) {
+    int i = 0; 
+    while (fno.fname[0] != 0 && fr == FR_OK) {
+        if (fno.fname[0] == '.') goto next;  
         out = (char **)realloc(out, (i+1) * sizeof(char *));
         out[i] = (char *)malloc(FF_LFN_BUF);
         strcpy(out[i], pathb);
         strcat(out[i], fno.fname);
         pathb[pathlen+1] = 0;
+        i++;
+       next:
         f_findnext(&dp, &fno);
     }
 

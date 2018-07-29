@@ -8,6 +8,10 @@
 
 #define INI1_MAGIC 0x31494E49
 
+static u8 customSecmon = 0;
+static u8 customWarmboot = 0;
+static u8 customKern = 0;
+
 typedef struct _pkg2_hdr_t
 {
 	u8 ctr[0x10];
@@ -44,7 +48,7 @@ typedef struct _pkg2_kip1_sec_t
 typedef struct _pkg2_kip1_t
 {
 	u32 magic;
-	u8 name[12];
+	char name[12];
 	u64 tid;
 	u32 proc_cat;
 	u8 main_thrd_prio;
@@ -86,5 +90,8 @@ typedef struct {
 } pk11_header;
 
 pkg2_hdr_t *unpackFirmwarePackage(u8 *data);
-u8 pkg1_unpack(pk11_offs *offs, u8 *pkg1);
+void pkg1_unpack(pk11_offs *offs, u8 *pkg1);
 void buildFirmwarePackage(u8 *kernel, u32 kernel_size, link_t *kips_info);
+size_t calcKipSize(pkg2_kip1_t *kip1);
+void pkg2_parse_kips(link_t *info, pkg2_hdr_t *pkg2);
+void loadKip(link_t *info, char *path);

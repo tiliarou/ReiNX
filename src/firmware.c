@@ -27,12 +27,11 @@
 #define VERSION "v0.1"
 
 static pk11_offs *pk11Offs = NULL;
-static u8 customSecmon = 0;
-static u8 customWarmboot = 0;
 
 // TODO: Maybe find these with memsearch
 static const pk11_offs _pk11_offs[] = {
-    { "20161121183008", 0, 0x1900, 0x3FE0, { 2, 1, 0 }, 0x4002B020, 0x8000D000, 1 }, //1.0.0
+    //{ "20161121183008", 0, 0x1900, 0x3FE0, { 2, 1, 0 }, 0x4002B020, 0x8000D000, 1 }, //TODO: relocator patch for 1.0.0
+    { "20161121183008", 0, 0x1900, 0x3FE0, { 2, 1, 0 }, 0x40014020, 0x8000D000, 1 }, //1.0.0
     { "20170210155124", 0, 0x1900, 0x3FE0, { 0, 1, 2 }, 0x4002D000, 0x8000D000, 1 }, //2.0.0 - 2.3.0
     { "20170519101410", 1, 0x1A00, 0x3FE0, { 0, 1, 2 }, 0x4002D000, 0x8000D000, 1 }, //3.0.0
     { "20170710161758", 2, 0x1A00, 0x3FE0, { 0, 1, 2 }, 0x4002D000, 0x8000D000, 1 }, //3.0.1 - 3.0.2
@@ -56,78 +55,62 @@ static void SE_lock() {
 
 void drawSplash() {
     // Draw splashscreen to framebuffer.
-    if(fopen("/ReiNX/splash.bin", "rb") != NULL) {
+    if(fopen("/ReiNX/splash.bin", "rb") != 0) {
         fread((void*)0xC0000000, fsize(), 1);
         fclose();
     }
-    sleep(3000000);
+    usleep(3000000);
 }
 
 pk11_offs *pkg11_offsentify(u8 *pkg1) {
     for (u32 i = 0; _pk11_offs[i].id; i++)
         if (!memcmp(pkg1 + 0x10, _pk11_offs[i].id, 12))
-            return &_pk11_offs[i];
+            return (pk11_offs *)&_pk11_offs[i];
     return NULL;
 }
 
-static u32 calcKipSize(pkg2_kip1_t *kip1) {
-    u32 size = sizeof(pkg2_kip1_t);
-    for (u32 j = 0; j < KIP1_NUM_SECTIONS; j++)
-        size += kip1->sections[j].size_comp;
-    return size;
-}
-
-void pkg2_parse_kips(link_t *info, pkg2_hdr_t *pkg2) {
-    u8 *ptr = pkg2->data + pkg2->sec_size[PKG2_SEC_KERNEL];
-    pkg2_ini1_t *ini1 = (pkg2_ini1_t *)ptr;
-    ptr += sizeof(pkg2_ini1_t);
-
-    for (u32 i = 0; i < ini1->num_procs; i++) {
-        pkg2_kip1_t *kip1 = (pkg2_kip1_t *)ptr;
-        pkg2_kip1_info_t *ki = (pkg2_kip1_info_t *)malloc(sizeof(pkg2_kip1_info_t));
-        ki->kip1 = kip1;
-        ki->size = calcKipSize(kip1);
-        list_append(info, &ki->link);
-        ptr += ki->size;
-    }
-}
-
-void loadKip(link_t *info, char *path) {
-    if(fopen(path, "rb") == NULL) return;
-    pkg2_kip1_t *ckip = malloc(fsize());
-    fread(ckip, fsize(), 1);
-    fclose();
-    LIST_FOREACH_ENTRY(pkg2_kip1_info_t, ki, info, link) {
-        if (ki->kip1->tid == ckip->tid) {
-            ki->kip1 = ckip;
-            ki->size = calcKipSize(ckip);
-            return;
-        }
-    }
-    pkg2_kip1_info_t *ki = malloc(sizeof(pkg2_kip1_info_t));
-    ki->kip1 = ckip;
-    ki->size = calcKipSize(ckip);
-    list_append(info, &ki->link);
-}
-
-void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2) {
+void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
+    //Secmon patches
     if(!customSecmon){
+        uPtr *rlc_ptr = NULL;
         uPtr *ver_ptr = NULL;
         uPtr *pk21_ptr = NULL;
         uPtr *hdrsig_ptr = NULL;
         uPtr *sha2_ptr = NULL;
         switch(pk11->kb) {
-            case KB_FIRMWARE_VERSION_100_200:
+            case KB_FIRMWARE_VERSION_100_200: {
+                //u8 rlcPattern[] = {0xE0, 0xFF, 0x1D, 0xF0, 0x00, 0x00, 0x00, 0x91}; //TODO: relocator patch for 1.0.0
+                u8 verPattern[] = {0x19, 0x00, 0x36, 0xE0, 0x03, 0x08, 0x91};
+                u8 hdrSigPattern[] = {0xFF, 0x97, 0xC0, 0x00, 0x00, 0x34, 0xA1, 0xFF, 0xFF};
+                u8 sha2Pattern[] = {0xE0, 0x03, 0x08, 0x91, 0xE1, 0x03, 0x13, 0xAA};
+
+                ver_ptr = (uPtr*)(memsearch((void *)pk11->secmon_base, 0x10000, verPattern, sizeof(verPattern)) + 0xB);
+                hdrsig_ptr = (uPtr*)(memsearch((void *)pk11->secmon_base, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x3A);
+                sha2_ptr = (uPtr*)(memsearch((void *)pk11->secmon_base, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x10);
+                break;
+            }
             case KB_FIRMWARE_VERSION_300:
             case KB_FIRMWARE_VERSION_301: {
-                u8 verPattern[] = {0x40, 0x19, 0x00, 0x36, 0x47, 0xD7, 0xFF, 0x97};
-                u8 hdrSigPattern[] = {0x80, 0x1E, 0x00, 0x36, 0x6B, 0xD7, 0xFF, 0x97};
-                u8 sha2Pattern[] = {0xC0, 0x18, 0x00, 0x36, 0x40, 0xD7, 0xFF, 0x97};
+                u8 verPattern[] = {0x2B, 0xFF, 0xFF, 0x97, 0x40, 0x19, 0x00, 0x36};
+                u8 hdrSigPattern[] = {0xF7, 0xFE, 0xFF, 0x97, 0x80, 0x1E, 0x00, 0x36};
+                u8 sha2Pattern[] = {0x07, 0xFF, 0xFF, 0x97, 0xC0, 0x18, 0x00, 0x36};
                 u8 pk21Pattern[] = {0x40, 0x19, 0x00, 0x36, 0xE0, 0x03, 0x08, 0x91};
+
+                ver_ptr = (uPtr*)(memsearch((void *)pk11->secmon_base, 0x10000, verPattern, sizeof(verPattern)) + 0x4);
+                pk21_ptr = (uPtr*)memsearch((void *)pk11->secmon_base, 0x10000, pk21Pattern, sizeof(pk21Pattern));
+                hdrsig_ptr = (uPtr*)(memsearch((void *)pk11->secmon_base, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
+                sha2_ptr = (uPtr*)(memsearch((void *)pk11->secmon_base, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x4);
+                break;
+            }
+            case KB_FIRMWARE_VERSION_400: {
+                u8 verPattern[] = {0x00, 0x01, 0x00, 0x36, 0xFD, 0x7B, 0x41, 0xA9};
+                u8 hdrSigPattern[] = {0xE0, 0x03, 0x13, 0xAA, 0x4B, 0x28, 0x00, 0x94};
+                u8 sha2Pattern[] = {0xD3, 0xD5, 0xFF, 0x97, 0xE0, 0x03, 0x01, 0x32};
+                u8 pk21Pattern[] = {0xE0, 0x00, 0x00, 0x36, 0xE0, 0x03, 0x13, 0xAA, 0x63};
 
                 ver_ptr = (uPtr*)memsearch((void *)pk11->secmon_base, 0x10000, verPattern, sizeof(verPattern));
                 pk21_ptr = (uPtr*)memsearch((void *)pk11->secmon_base, 0x10000, pk21Pattern, sizeof(pk21Pattern));
-                hdrsig_ptr = (uPtr*)memsearch((void *)pk11->secmon_base, 0x10000, hdrSigPattern, sizeof(hdrSigPattern));
+                hdrsig_ptr = (uPtr*)(memsearch((void *)pk11->secmon_base, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x8);
                 sha2_ptr = (uPtr*)memsearch((void *)pk11->secmon_base, 0x10000, sha2Pattern, sizeof(sha2Pattern));
                 break;
             }
@@ -138,15 +121,30 @@ void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2) {
 
                 ver_ptr = (uPtr*)memsearch((void *)pk11->secmon_base, 0x10000, verPattern, sizeof(verPattern));
                 pk21_ptr = (uPtr*)((u32)ver_ptr - 0xC);
-                hdrsig_ptr = (uPtr*)(memsearch((void *)pk11->secmon_base, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 4);
+                hdrsig_ptr = (uPtr*)(memsearch((void *)pk11->secmon_base, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
                 sha2_ptr = (uPtr*)memsearch((void *)pk11->secmon_base, 0x10000, sha2Pattern, sizeof(sha2Pattern));
                 break;
             }
         }
-        *pk21_ptr = NOP;
+        /*if (pre2x) { //TODO: relocator patch for 1.0.0
+            *rlc_ptr = ADRP(0, 0x3BFE8020);
+        };*/
+        if (pk11->kb != KB_FIRMWARE_VERSION_100_200) {
+            *pk21_ptr = NOP;
+        };
         *ver_ptr = NOP;
         *hdrsig_ptr = NOP;
         *sha2_ptr = NOP;
+    }
+    if(!customKern) {
+        //TODO
+    }
+    LIST_FOREACH_ENTRY(pkg2_kip1_info_t, ki, kips, link) {        
+        //Patch FS
+        if(ki->kip1->tid == 0x0100000000000000) {
+            print("Patching FS\n");
+            //TODO
+        }
     }
 }
 
@@ -236,9 +234,7 @@ u8 loadFirm() {
     u8 *pkg11 = package1 + pk11Offs->pkg11_off;
     u32 pkg11_size = *(u32 *)pkg11;
     se_aes_crypt_ctr(11, pkg11 + 0x20, pkg11_size, pkg11 + 0x20, pkg11_size, pkg11 + 0x10);
-    ret = pkg1_unpack(pk11Offs, package1);
-    customWarmboot = ret & 1;
-    customSecmon = ret & 2;
+    pkg1_unpack(pk11Offs, package1);
     PMC(APBDEV_PMC_SCRATCH1) = pk11Offs->warmboot_base;
     free(package1);
 
@@ -278,7 +274,7 @@ u8 loadFirm() {
 
     // Patch firmware.
     print("Patching OS...\n");
-    patch(pk11Offs, dec_pkg2);
+    patch(pk11Offs, dec_pkg2, &kip1_info);
 
     // Load all KIPs.
     char **sysmods = NULL;
@@ -323,7 +319,7 @@ void launch() {
     // Boot secmon and Wait for it get ready.
     cluster_boot_cpu0(pk11Offs->secmon_base);
     while (!*SECMON_STATE_ADDR)
-        sleep(1);
+        usleep(1);
 
     // Disable display.
     if (pre4x)

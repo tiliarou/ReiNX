@@ -15,6 +15,7 @@
 */
 
 #include "hwinit/gfx.h"
+#include "hwinit/list.h"
 #include "error.h"
 #include "fs.h"
 #include "package.h"
@@ -46,7 +47,7 @@ pkg2_hdr_t *unpackFirmwarePackage(u8 *data) {
     return hdr;
 }
 
-u8 pkg1_unpack(pk11_offs *offs, u8 *pkg1) {
+void pkg1_unpack(pk11_offs *offs, u8 *pkg1) {
     u8 ret = 0;
     u8 *extWb;
     u8 *extSec;
@@ -59,7 +60,7 @@ u8 pkg1_unpack(pk11_offs *offs, u8 *pkg1) {
     for (u32 i = 0; i < 3; i++) {
         if (offs->sec_map[i] == 0 && offs->warmboot_base) {
             u8 *extWb = NULL;
-            if(fopen("/ReiNX/warmboot.bin", "rb") != NULL) {
+            if(fopen("/ReiNX/warmboot.bin", "rb") != 0) {
                 extWb = malloc(fsize());
                 fread(extWb, fsize(), 1);
                 fclose();
@@ -67,7 +68,7 @@ u8 pkg1_unpack(pk11_offs *offs, u8 *pkg1) {
             memcpy((void *)offs->warmboot_base, extWb == NULL ? pdata : extWb, sec_size[offs->sec_map[i]]);
         } else if (offs->sec_map[i] == 2 && offs->secmon_base) {
             u8 *extSec = NULL;
-            if(fopen("/ReiNX/secmon.bin", "rb") != NULL) {
+            if(fopen("/ReiNX/secmon.bin", "rb") != 0) {
                 extSec = malloc(fsize());
                 fread(extSec, fsize(), 1);
                 fclose();
@@ -78,13 +79,12 @@ u8 pkg1_unpack(pk11_offs *offs, u8 *pkg1) {
     }
     if(extWb != NULL) {
         free(extWb); 
-        ret |= 1;
+        customWarmboot = 1;
     }
     if(extSec != NULL) {
         free(extSec); 
-        ret |= 2;
+        customSecmon = 1;
     }
-	return ret;
 }
 
 void buildFirmwarePackage(u8 *kernel, u32 kernel_size, link_t *kips_info) {
@@ -104,11 +104,12 @@ void buildFirmwarePackage(u8 *kernel, u32 kernel_size, link_t *kips_info) {
 
     // Kernel.
     u8 *extKern = NULL;
-    if(fopen("/ReiNX/kernel.bin", "rb") != NULL) {
+    if(fopen("/ReiNX/kernel.bin", "rb") != 0) {
         extKern = malloc(fsize());
         fread(extKern, fsize(), 1);
         fclose();
     }
+    if(extKern != NULL) customKern = 1;
     memcpy(pdst, extKern == NULL ? kernel : extKern, kernel_size);
     hdr->sec_size[PKG2_SEC_KERNEL] = kernel_size;
     hdr->sec_off[PKG2_SEC_KERNEL] = 0x10000000;
@@ -140,4 +141,44 @@ void buildFirmwarePackage(u8 *kernel, u32 kernel_size, link_t *kips_info) {
     se_aes_crypt_ctr(8, hdr, sizeof(pkg2_hdr_t), hdr, sizeof(pkg2_hdr_t), hdr);
     memset(hdr->ctr, 0 , 0x10);
     *(u32 *)hdr->ctr = 0x100 + sizeof(pkg2_hdr_t) + kernel_size + ini1_size;
+}
+
+size_t calcKipSize(pkg2_kip1_t *kip1) {
+    u32 size = sizeof(pkg2_kip1_t);
+    for (u32 j = 0; j < KIP1_NUM_SECTIONS; j++)
+        size += kip1->sections[j].size_comp;
+    return size;
+}
+
+void pkg2_parse_kips(link_t *info, pkg2_hdr_t *pkg2) {
+    u8 *ptr = pkg2->data + pkg2->sec_size[PKG2_SEC_KERNEL];
+    pkg2_ini1_t *ini1 = (pkg2_ini1_t *)ptr;
+    ptr += sizeof(pkg2_ini1_t);
+
+    for (u32 i = 0; i < ini1->num_procs; i++) {
+        pkg2_kip1_t *kip1 = (pkg2_kip1_t *)ptr;
+        pkg2_kip1_info_t *ki = (pkg2_kip1_info_t *)malloc(sizeof(pkg2_kip1_info_t));
+        ki->kip1 = kip1;
+        ki->size = calcKipSize(kip1);
+        list_append(info, &ki->link);
+        ptr += ki->size;
+    }
+}
+
+void loadKip(link_t *info, char *path) {
+    if(fopen(path, "rb") == 0) return;
+    pkg2_kip1_t *ckip = malloc(fsize());
+    fread(ckip, fsize(), 1);
+    fclose();
+    LIST_FOREACH_ENTRY(pkg2_kip1_info_t, ki, info, link) {
+        if (ki->kip1->tid == ckip->tid) {
+            ki->kip1 = ckip;
+            ki->size = calcKipSize(ckip);
+            return;
+        }
+    }
+    pkg2_kip1_info_t *ki = malloc(sizeof(pkg2_kip1_info_t));
+    ki->kip1 = ckip;
+    ki->size = calcKipSize(ckip);
+    list_append(info, &ki->link);
 }
