@@ -23,6 +23,7 @@
 #include "package.h"
 #include "error.h"
 #include "firmware.h"
+#include "kippatches.h"
 
 #define VERSION "v0.1"
 
@@ -58,8 +59,8 @@ void drawSplash() {
     if(fopen("/ReiNX/splash.bin", "rb") != 0) {
         fread((void*)0xC0000000, fsize(), 1);
         fclose();
+        usleep(3000000);
     }
-    usleep(3000000);
 }
 
 pk11_offs *pkg11_offsentify(u8 *pkg1) {
@@ -70,7 +71,7 @@ pk11_offs *pkg11_offsentify(u8 *pkg1) {
 }
 
 void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
-    //Secmon patches
+    //Patch Secmon
     if(!customSecmon){
         uPtr *rlc_ptr = NULL;
         uPtr *ver_ptr = NULL;
@@ -136,14 +137,88 @@ void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
         *hdrsig_ptr = NOP;
         *sha2_ptr = NOP;
     }
+    
+    //Patch Kernel
     if(!customKern) {
-        //TODO
+        u32 crc = crc32c(pkg2->data, pkg2->sec_size[PKG2_SEC_KERNEL]);
+		const pkg2_kernel_id_t * id = pkg2_identify(crc);
+		
+		kernel_patch_t * kpatch = id->kernel_patchset;
+		if(kpatch!=NULL) {
+			for(int i=0; kpatch[i].id!=-1; i++) {
+				if(kpatch[i].id != ATM_ARR_PATCH)
+					*(vu32 *)(pkg2->data + kpatch[i].off) = kpatch[i].val;
+				else {
+					u32 * temp = (u32 *)kpatch[i].ptr;
+					for(int j=0; j< kpatch[i].val; j++) {
+						*(vu32*)(pkg2->data + kpatch[i].off + j*4) = temp[j];
+					}
+				}
+			}
+		}
     }
+
+    u8 kipHash[0x20];
+    char *patchFilter[] = { "nosigchk", "nocmac", "nogc", NULL };
+
+    // enable nogc if there's a file called "nogc" in /ReiNX/ 
+    //(I expect the 1% of people this effects can read the guide)
+    if (!fopen("/ReiNX/nogc", "rb")) {
+        patchFilter[2] = NULL;
+        fclose();
+    }
+
+    //Patch FS module (truly not my proudest code TODO cleanup)
     LIST_FOREACH_ENTRY(pkg2_kip1_info_t, ki, kips, link) {        
         //Patch FS
         if(ki->kip1->tid == 0x0100000000000000) {
             print("Patching FS\n");
-            //TODO
+
+            // calc hash of source kip
+            se_calc_sha256(kipHash, ki->kip1, ki->size);
+            // HACK: for some reason it doesn't always compute correct hash the first time,
+            //       but seems to always do it correctly on the second try. maybe there's some
+            //       init code missing to make this work? I don't even
+            se_calc_sha256(kipHash, ki->kip1, ki->size);
+
+            //Create header
+            size_t sizeDiff = ki->kip1->sections[0].size_decomp - ki->kip1->sections[0].size_comp;
+            size_t newSize = ki->size + sizeDiff;
+            pkg2_kip1_t *moddedKip = malloc(newSize);
+            memcpy(moddedKip, ki->kip1, newSize);
+            u32 pos = 0;
+            for(int i = 0; i < KIP1_NUM_SECTIONS; i++) {
+                if(!i) {
+                    //Get decomp .text segment
+                    u8 *kipDecompText = blz_decompress(moddedKip->data, moddedKip->sections[i].size_comp);
+
+                    kippatchset_t *pset = kippatch_find_set(kipHash, kip_patches);
+                    if (!pset) {
+                      print("  could not find patchset with matching hash\n");
+                    } else {
+                      int res = kippatch_apply_set(kipDecompText, moddedKip->sections[i].size_decomp, pset, patchFilter);
+                      if (res) {
+                          gfx_con_setcol(&gfx_con, RED, 0, 0);
+                          print("Error: kippatch_apply_set() returned %d\n", res);
+                          gfx_con_setcol(&gfx_con, ORANGE, 0, 0);
+                      }
+                    }
+
+                    moddedKip->flags &= ~1;
+                    memcpy((void*)moddedKip->data, kipDecompText, moddedKip->sections[i].size_decomp);
+                    free(kipDecompText);
+                    pos += moddedKip->sections[i].size_comp;
+                    moddedKip->sections[i].size_comp = moddedKip->sections[i].size_decomp;
+                } else {
+                    if(moddedKip->sections[i].offset == 0) continue;
+                    memcpy((void*)moddedKip->data + pos + sizeDiff, (void*)ki->kip1->data + pos, moddedKip->sections[i].size_comp);
+                    pos += moddedKip->sections[i].size_comp;
+                }
+            }
+            
+            free(ki->kip1);
+            ki->size = newSize;
+            ki->kip1 = moddedKip;
         }
     }
 }
