@@ -20,17 +20,19 @@
 #include "fs.h"
 #include "package.h"
 #include "error.h"
+#include "bootloader.h"
 #include "firmware.h"
 
 static pk11_offs *pk11Offs = NULL;
 
-void drawSplash() {
+int drawSplash() {
     // Draw splashscreen to framebuffer.
     if(fopen("/ReiNX/splash.bin", "rb") != 0) {
         fread((void*)0xC0000000, fsize(), 1);
         fclose();
-        usleep(3000000);
+        return 1;
     }
+    return 0;
 }
 
 pk11_offs *pkg11_offsentify(u8 *pkg1) {
@@ -185,68 +187,6 @@ void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
     }
 }
 
-int keygen(u8 *keyblob, u32 fwVer, void *tsec_fw) {
-    u8 tmp[0x10];
-
-    se_key_acc_ctrl(0x0D, 0x15);
-    se_key_acc_ctrl(0x0E, 0x15);
-
-    // Get TSEC key.
-    if (tsec_query(tmp, 1, tsec_fw) < 0)
-        return 0;
-
-    se_aes_key_set(0x0D, tmp, 0x10);
-
-    // Derive keyblob keys from TSEC+SBK.
-    se_aes_crypt_block_ecb(0x0D, 0x00, tmp, keyblob_keyseeds[0]);
-    se_aes_unwrap_key(0x0F, 0x0E, tmp);
-    se_aes_crypt_block_ecb(0xD, 0x00, tmp, keyblob_keyseeds[fwVer]);
-    se_aes_unwrap_key(0x0D, 0x0E, tmp);
-
-    // Clear SBK
-    se_aes_key_clear(0x0E);
-
-    se_aes_crypt_block_ecb(0x0D, 0, tmp, cmac_keyseed);
-    se_aes_unwrap_key(0x0B, 0x0D, cmac_keyseed);
-
-    // Decrypt keyblob and set keyslots.
-    se_aes_crypt_ctr(0x0D, keyblob + 0x20, 0x90, keyblob + 0x20, 0x90, keyblob + 0x10);
-    se_aes_key_set(0x0B, keyblob + 0x20 + 0x80, 0x10); // Package1 key
-    se_aes_key_set(0x0C, keyblob + 0x20, 0x10);
-    se_aes_key_set(0x0D, keyblob + 0x20, 0x10);
-
-    se_aes_crypt_block_ecb(0x0C, 0, tmp, master_keyseed_retail);
-
-    switch (fwVer) {
-        case KB_FIRMWARE_VERSION_100_200:
-        case KB_FIRMWARE_VERSION_300:
-        case KB_FIRMWARE_VERSION_301:
-            se_aes_unwrap_key(0x0D, 0x0F, console_keyseed);
-            se_aes_unwrap_key(0x0C, 0x0C, master_keyseed_retail);
-        break;
-
-        case KB_FIRMWARE_VERSION_400:
-            se_aes_unwrap_key(0x0D, 0x0F, console_keyseed_4xx);
-            se_aes_unwrap_key(0x0F, 0x0F, console_keyseed);
-            se_aes_unwrap_key(0x0E, 0x0C, master_keyseed_4xx);
-            se_aes_unwrap_key(0x0C, 0x0C, master_keyseed_retail);
-        break;
-
-        case KB_FIRMWARE_VERSION_500:
-        case KB_FIRMWARE_VERSION_600:
-        default:
-            se_aes_unwrap_key(0x0A, 0x0F, console_keyseed_4xx);
-            se_aes_unwrap_key(0x0F, 0x0F, console_keyseed);
-            se_aes_unwrap_key(0x0E, 0x0C, master_keyseed_4xx);
-            se_aes_unwrap_key(0x0C, 0x0C, master_keyseed_retail);
-        break;
-    }
-
-    // Package2 key
-    se_key_acc_ctrl(0x08, 0x15);
-    se_aes_unwrap_key(0x08, 0x0C, key8_keyseed);
-}
-
 u8 loadFirm() {
     sdmmc_storage_t storage;
     sdmmc_t sdmmc;
@@ -370,7 +310,7 @@ void firmware() {
             i2c_send_byte(I2C_5, 0x3C, MAX77620_REG_ONOFFCNFG1, MAX77620_ONOFFCNFG1_PWR_OFF);
         btn_wait();
     }
-    
+
     if(PMC(APBDEV_PMC_SCRATCH49) != 69 && fopen("/ReiNX.bin", "rb")) {
         fread((void*)PAYLOAD_ADDR, fsize(), 1);
         fclose();
@@ -383,9 +323,14 @@ void firmware() {
     }
     SYSREG(AHB_AHB_SPARE_REG) = (volatile vu32)0xFFFFFF9F;
 	PMC(APBDEV_PMC_SCRATCH49) = 0;
-    
+
+    if (btn_read() & BTN_VOL_DOWN) {
+        print("Booting verbosely\n");
+    } else if (drawSplash()) {
+        gfx_con.mute = 1;
+    }
+
     print("Welcome to ReiNX %s!\n", VERSION);
     loadFirm();
-    drawSplash();
     launch();
 }
