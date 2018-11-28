@@ -35,10 +35,56 @@ int drawSplash() {
     return 0;
 }
 
-pk11_offs *pkg11_offsentify(u8 *pkg1) {
-    for (u32 i = 0; _pk11_offs[i].id; i++)
-        if (!memcmp(pkg1 + 0x10, _pk11_offs[i].id, 12))
-            return (pk11_offs *)&_pk11_offs[i];
+void patchFS(pkg2_kip1_info_t* ki) {
+    u8 kipHash[0x20];
+
+    print("Patching FS\n");
+          
+    se_calc_sha256(&kipHash, ki->kip1, ki->size);
+    se_calc_sha256(&kipHash, ki->kip1, ki->size);
+
+    //Create header
+    size_t sizeDiff = ki->kip1->sections[0].size_decomp - ki->kip1->sections[0].size_comp;
+
+    size_t newSize = ki->size + sizeDiff;
+    pkg2_kip1_t *moddedKip = malloc(newSize);
+    memcpy(moddedKip, ki->kip1, newSize);
+
+    u32 pos = 0;
+    //Get decomp .text segment
+    u8 *kipDecompText = blz_decompress(moddedKip->data, moddedKip->sections[0].size_comp);
+
+    kippatchset_t *pset = kippatch_find_set(kipHash, kip_patches);
+    if (!pset) {
+        print("  could not find patchset with matching hash\n");
+    } else {
+        int res = kippatch_apply_set(kipDecompText, moddedKip->sections[0].size_decomp, pset);
+        if (res) error("kippatch_apply_set() failed\n");
+    }
+
+    moddedKip->flags &= ~1;
+    memcpy((void*)moddedKip->data, kipDecompText, moddedKip->sections[0].size_decomp);
+    free(kipDecompText);
+    pos += moddedKip->sections[0].size_comp;
+    moddedKip->sections[0].size_comp = moddedKip->sections[0].size_decomp;
+
+    for(int i = 1; i < KIP1_NUM_SECTIONS; i++) {
+        if(moddedKip->sections[i].offset != 0) {
+            memcpy((void*)moddedKip->data + pos + sizeDiff, (void*)ki->kip1->data + pos, moddedKip->sections[i].size_comp);
+            pos += moddedKip->sections[i].size_comp;
+        }
+    }
+    
+    free(ki->kip1);
+    ki->size = newSize;
+    ki->kip1 = moddedKip;
+}
+
+pkg2_kip1_info_t* find_by_tid(link_t* kip_list, u64 tid) {
+    LIST_FOREACH_ENTRY(pkg2_kip1_info_t, ki, kip_list, link) { 
+        if(ki->kip1->tid == 0x0100000000000000)
+            return ki;
+    }
     return NULL;
 }
 
@@ -51,7 +97,8 @@ void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
         uPtr *hdrsig_ptr = NULL;
         uPtr *sha2_ptr = NULL;
         switch(pk11->kb) {
-            case KB_FIRMWARE_VERSION_100_200: {
+            //case KB_FIRMWARE_VERSION_100:
+            case KB_FIRMWARE_VERSION_200: {
                 u8 verPattern[] = {0x19, 0x00, 0x36, 0xE0, 0x03, 0x08, 0x91};
                 u8 hdrSigPattern[] = {0xFF, 0x97, 0xC0, 0x00, 0x00, 0x34, 0xA1, 0xFF, 0xFF};
                 u8 sha2Pattern[] = {0xE0, 0x03, 0x08, 0x91, 0xE1, 0x03, 0x13, 0xAA};
@@ -110,7 +157,7 @@ void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
             }
         }
         
-        if (pk11->kb != KB_FIRMWARE_VERSION_100_200) {
+        if (pk11->kb > KB_FIRMWARE_VERSION_200) {
             *pk21_ptr = NOP;
         };
         *ver_ptr = NOP;
@@ -122,7 +169,7 @@ void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
     if(!customKern) {
         u32 crc = crc32c(pkg2->data, pkg2->sec_size[PKG2_SEC_KERNEL]);
         uPtr kern = (uPtr)&pkg2->data;
-        uPtr sendOff, recvOff, codeRcvOff, codeSndOff, svcVerifOff, svcDebugOff, ver;
+        uPtr sendOff, recvOff, codeRcvOff, codeSndOff, svcVerifOff, svcDebugOff, ver, peek, poke;
         switch(crc){
             case 0x427f2647:{   //1.0.0
                 svcVerifOff = 0x3764C;
@@ -181,6 +228,8 @@ void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
                 recvOff = 0x28DAC;
                 codeSndOff = 8;
                 codeRcvOff = 8;
+                peek = 0x42D3C;
+                poke = 0x42E00;
                 ver = 5;
                 break;
             }
@@ -191,6 +240,8 @@ void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
                 recvOff = 0x29B6C;
                 codeSndOff = 0x10;
                 codeRcvOff = 0x10;
+                peek = 0x44E84;
+                poke = 0x44F48;
                 ver = 6;
                 break;
             }
@@ -200,12 +251,12 @@ void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
         }
         
         //ID Send
-        uPtr freeSpace = getFreeSpace((void*)(kern+0x45000), 0x200, 0x20000) + 0x45000;      //Find area to write payload
+        uPtr freeSpace = getFreeSpace((void*)(kern+0x45000), 0x200, 0x20000) + 0x45000;                //Find area to write payload
         print("Kernel Freespace: 0x%08X\n", freeSpace);
         size_t payloadSize;
         u32 *sndPayload = getSndPayload(ver, &payloadSize);
         *(vu32*)(kern + sendOff) = _B(sendOff, freeSpace);                                             //write hook to payload
-        memcpy((void*)(kern + freeSpace), sndPayload, payloadSize);                             //Copy payload to free space
+        memcpy((void*)(kern + freeSpace), sndPayload, payloadSize);                                    //Copy payload to free space
         *(vu32*)(kern + freeSpace + payloadSize) = _B(freeSpace + payloadSize, sendOff + codeSndOff);  //Jump back skipping the hook
         
         //ID Receive
@@ -221,56 +272,19 @@ void patch(pk11_offs *pk11, pkg2_hdr_t *pkg2, link_t *kips) {
             fclose();
             *(vu32*)(kern + svcDebugOff) = _MOVZX(8, 1, 0);
         }
+        if(peek && poke) {
+            memcpy((void*)(kern + peek), peekPayload, sizeof(peekPayload));
+            memcpy((void*)(kern + poke), pokePayload, sizeof(pokePayload));
+        }
         
         end:;
     }
-
-    u8 kipHash[0x20];
     
-    //Patch FS module (truly not my proudest code TODO cleanup)
-    LIST_FOREACH_ENTRY(pkg2_kip1_info_t, ki, kips, link) {        
-        //Patch FS
-        if(ki->kip1->tid == 0x0100000000000000) {
-            print("Patching FS\n");
-            
-            se_calc_sha256(&kipHash, ki->kip1, ki->size);
-            se_calc_sha256(&kipHash, ki->kip1, ki->size);
-
-            //Create header
-            size_t sizeDiff = ki->kip1->sections[0].size_decomp - ki->kip1->sections[0].size_comp;
-            size_t newSize = ki->size + sizeDiff;
-            pkg2_kip1_t *moddedKip = malloc(newSize);
-            memcpy(moddedKip, ki->kip1, newSize);
-            u32 pos = 0;
-            for(int i = 0; i < KIP1_NUM_SECTIONS; i++) {
-                if(!i) {
-                    //Get decomp .text segment
-                    u8 *kipDecompText = blz_decompress(moddedKip->data, moddedKip->sections[i].size_comp);
-
-                    kippatchset_t *pset = kippatch_find_set(kipHash, kip_patches);
-                    if (!pset) {
-                      print("  could not find patchset with matching hash\n");
-                    } else {
-                      int res = kippatch_apply_set(kipDecompText, moddedKip->sections[i].size_decomp, pset);
-                      if (res) error("kippatch_apply_set() failed\n");
-                    }
-
-                    moddedKip->flags &= ~1;
-                    memcpy((void*)moddedKip->data, kipDecompText, moddedKip->sections[i].size_decomp);
-                    free(kipDecompText);
-                    pos += moddedKip->sections[i].size_comp;
-                    moddedKip->sections[i].size_comp = moddedKip->sections[i].size_decomp;
-                } else {
-                    if(moddedKip->sections[i].offset == 0) continue;
-                    memcpy((void*)moddedKip->data + pos + sizeDiff, (void*)ki->kip1->data + pos, moddedKip->sections[i].size_comp);
-                    pos += moddedKip->sections[i].size_comp;
-                }
-            }
-            
-            free(ki->kip1);
-            ki->size = newSize;
-            ki->kip1 = moddedKip;
-        }
+    pkg2_kip1_info_t* FS_module = find_by_tid(kips, 0x0100000000000000);
+    if(FS_module == NULL) {
+        error("Could not find FS Module.\n");
+    } else {
+        patchFS(FS_module);
     }
 }
 
@@ -281,25 +295,37 @@ u8 loadFirm() {
     //Init nand
     sdmmc_storage_init_mmc(&storage, &sdmmc, SDMMC_4, SDMMC_BUS_WIDTH_8, 4);
     sdmmc_storage_set_mmc_partition(&storage, 1);
+    
+    //Read Boot0
+    u8 *bootBuf = (u8 *)malloc(NX_EMMC_BLOCKSIZE);
+    sdmmc_storage_read(&storage, 0x2200 / NX_EMMC_BLOCKSIZE , 1, bootBuf);
+    u32 ver = *(u32*)(bootBuf+0x130);
+    for (u32 i = 0; _pk11_offs[i].kb != 0; i++) {   //TODO distinguish 1.x & 2.x 
+        if(_pk11_offs[i].kb == ver){
+            pk11Offs = (pk11_offs *)&_pk11_offs[i];
+            break;
+        }
+    }
+    print("Bootloader version: %d\n", ver);
+    free(bootBuf);
 
     // Read package1.
-    u8 *package1 = ReadPackage1(&storage);
+    u8 *pkg1ldr = ReadPackage1Ldr(&storage);
 
     // Setup firmware specific data.
-    pk11Offs = pkg11_offsentify(package1);
     u8 *keyblob = (u8 *)malloc(NX_EMMC_BLOCKSIZE);
-    sdmmc_storage_read(&storage, 0x180000 / NX_EMMC_BLOCKSIZE + pk11Offs->kb, 1, keyblob);
-    keygen(keyblob, pk11Offs->kb, package1 + pk11Offs->tsec_off);
+    sdmmc_storage_read(&storage, 0x180000 / NX_EMMC_BLOCKSIZE + pk11Offs->kb-1, 1, keyblob);
+    keygen(keyblob, pk11Offs->kb, pkg1ldr + pk11Offs->tsec_off);
     free(keyblob);
 
     // Decrypt package1 and setup warmboot.
     print("Decrypting Package1...\n");
-    u8 *pkg11 = package1 + pk11Offs->pkg11_off;
+    u8 *pkg11 = pkg1ldr + pk11Offs->pkg11_off;
     u32 pkg11_size = *(u32 *)pkg11;
     se_aes_crypt_ctr(11, pkg11 + 0x20, pkg11_size, pkg11 + 0x20, pkg11_size, pkg11 + 0x10);
-    pkg1_unpack(pk11Offs, package1);
+    pkg1_unpack(pk11Offs, pkg11);
     PMC(APBDEV_PMC_SCRATCH1) = pk11Offs->warmboot_base;
-    free(package1);
+    free(pkg1ldr);
 
     //Read package2
     u8 *pkg2 = ReadPackage2(&storage);
@@ -410,6 +436,20 @@ void firmware() {
     }
     SYSREG(AHB_AHB_SPARE_REG) = (volatile vu32)0xFFFFFF9F;
     PMC(APBDEV_PMC_SCRATCH49) = 0;
+    
+    if(btn_read() & BTN_VOL_UP){
+        if(fopen("/ReiNX/Recovery.bin", "rb") != 0) {
+            fread((void*)PAYLOAD_ADDR, fsize(), 1);
+            fclose();
+            sdUnmount();
+            CLOCK(CLK_RST_CONTROLLER_CLK_OUT_ENB_V) |= 0x400; // Enable AHUB clock.
+            CLOCK(CLK_RST_CONTROLLER_CLK_OUT_ENB_Y) |= 0x40;  // Enable APE clock.
+            ((void (*)())PAYLOAD_ADDR)();
+        } else {
+            error("Failed to launch recovery menu!\nIs it missing from /ReiNX folder?\n");
+            btn_wait();
+        }
+    }
 
     if (btn_read() & BTN_VOL_DOWN) {
         print("Booting verbosely\n");
