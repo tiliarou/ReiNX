@@ -38,7 +38,7 @@ int drawSplash() {
 
 void patchFS(pkg2_kip1_info_t* ki) {
     print("Patching FS\n");
-    
+
     u8 kipHash[0x20];
 
     se_calc_sha256(&kipHash, ki->kip1, ki->size);
@@ -89,6 +89,22 @@ pkg2_kip1_info_t* find_by_tid(link_t* kip_list, u64 tid) {
     return NULL;
 }
 
+void patchWarmboot(u32 warmbootBase) {
+    print("Patching Warmboot...\n");
+    if(!customWarmboot) {
+        uPtr *fuseCheck = NULL;
+        uPtr *segmentID = NULL;
+        u8 fuseCheckPat[] = {0x44, 0x12, 0x80, 0xE5};
+        u8 segmentIDPat[] = {0x60, 0x03, 0x91, 0xE5};
+        fuseCheck = (uPtr*)(memsearch((void *)warmbootBase, 0x1000, fuseCheckPat, sizeof(fuseCheckPat)) + 20);
+        segmentID = (uPtr*)(memsearch((void *)warmbootBase, 0x1000, segmentIDPat, sizeof(segmentIDPat)) + 12);
+        
+        *fuseCheck = NOP_v7;
+        if(segmentID != NULL)
+            *segmentID = NOP_v7;
+    }
+}
+
 void patchSecmon(u32 secmonBase, u32 fw){
     print("Patching Secmon...\n");
     //Patch Secmon
@@ -98,83 +114,123 @@ void patchSecmon(u32 secmonBase, u32 fw){
         uPtr *pk21_ptr = NULL;
         uPtr *hdrsig_ptr = NULL;
         uPtr *sha2_ptr = NULL;
+        
+        //Version
         switch(fw) {
             //case KB_FIRMWARE_VERSION_100:
             case KB_FIRMWARE_VERSION_200: {
                 u8 verPattern[] = {0x19, 0x00, 0x36, 0xE0, 0x03, 0x08, 0x91};
-                u8 hdrSigPattern[] = {0xFF, 0x97, 0xC0, 0x00, 0x00, 0x34, 0xA1, 0xFF, 0xFF};
-                u8 sha2Pattern[] = {0xE0, 0x03, 0x08, 0x91, 0xE1, 0x03, 0x13, 0xAA};
-
                 ver_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern)) + 0xB);
-                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x3A);
-                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x10);
                 break;
             }
             case KB_FIRMWARE_VERSION_300:
             case KB_FIRMWARE_VERSION_301: {
                 u8 verPattern[] = {0x2B, 0xFF, 0xFF, 0x97, 0x40, 0x19, 0x00, 0x36};
-                u8 hdrSigPattern[] = {0xF7, 0xFE, 0xFF, 0x97, 0x80, 0x1E, 0x00, 0x36};
-                u8 sha2Pattern[] = {0x07, 0xFF, 0xFF, 0x97, 0xC0, 0x18, 0x00, 0x36};
-                u8 pk21Pattern[] = {0x40, 0x19, 0x00, 0x36, 0xE0, 0x03, 0x08, 0x91};
-
                 ver_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern)) + 0x4);
-                pk21_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, pk21Pattern, sizeof(pk21Pattern));
-                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
-                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x4);
                 break;
             }
             case KB_FIRMWARE_VERSION_400: {
                 u8 verPattern[] = {0x00, 0x01, 0x00, 0x36, 0xFD, 0x7B, 0x41, 0xA9};
-                u8 hdrSigPattern[] = {0xE0, 0x03, 0x13, 0xAA, 0x4B, 0x28, 0x00, 0x94};
-                u8 sha2Pattern[] = {0xD3, 0xD5, 0xFF, 0x97, 0xE0, 0x03, 0x01, 0x32};
-                u8 pk21Pattern[] = {0xE0, 0x00, 0x00, 0x36, 0xE0, 0x03, 0x13, 0xAA, 0x63};
-
                 ver_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern));
-                pk21_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, pk21Pattern, sizeof(pk21Pattern));
-                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x8);
-                sha2_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern));
-                break;
-            }
-            case KB_FIRMWARE_VERSION_500: {
-                u8 verPattern[] = {0x00, 0x01, 0x00, 0x36, 0xFD, 0x7B, 0x41, 0xA9};
-                u8 hdrSigPattern[] = {0x86, 0xFE, 0xFF, 0x97, 0x80, 0x00, 0x00, 0x36};
-                u8 sha2Pattern[] = {0xF2, 0xFB, 0xFF, 0x97, 0xE0, 0x03};
-
-                ver_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern));
-                pk21_ptr = (uPtr*)((u32)ver_ptr - 0xC);
-                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
-                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)));
-                break;
-            }
-            case KB_FIRMWARE_VERSION_600: {
-                u8 verPattern[] = {0x00, 0x01, 0x00, 0x36, 0xFD, 0x7B, 0x41, 0xA9};
-                u8 hdrSigPattern[] = { 0x9A, 0xFF, 0xFF, 0x97, 0x80, 0x00, 0x00, 0x36};
-                u8 sha2Pattern[] = {0x81, 0x00, 0x80, 0x72, 0xB5, 0xFB, 0xFF, 0x97};
-
-                ver_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern));
-                pk21_ptr = (uPtr*)((u32)ver_ptr - 0xC);
-                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
-                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x4);
                 break;
             }
             default:{
                 u8 verPattern[] = {0x00, 0x01, 0x00, 0x36, 0xFD, 0x7B, 0x41, 0xA9};
+                ver_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern));
+                break;
+            }
+        }
+        
+        //header sig
+        switch(fw) {
+            //case KB_FIRMWARE_VERSION_100:
+            case KB_FIRMWARE_VERSION_200: {
+                u8 hdrSigPattern[] = {0xFF, 0x97, 0xC0, 0x00, 0x00, 0x34, 0xA1, 0xFF, 0xFF};
+                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x3A);
+                break;
+            }
+            case KB_FIRMWARE_VERSION_300:
+            case KB_FIRMWARE_VERSION_301: {
+                u8 hdrSigPattern[] = {0xF7, 0xFE, 0xFF, 0x97, 0x80, 0x1E, 0x00, 0x36};
+                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
+                break;
+            }
+            case KB_FIRMWARE_VERSION_400: {
+                u8 hdrSigPattern[] = {0xE0, 0x03, 0x13, 0xAA, 0x4B, 0x28, 0x00, 0x94};
+                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x8);
+                break;
+            }
+            case KB_FIRMWARE_VERSION_500: {
+                u8 hdrSigPattern[] = {0x86, 0xFE, 0xFF, 0x97, 0x80, 0x00, 0x00, 0x36};
+                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
+                break;
+            }
+            default:{
                 u8 hdrSigPattern[] = {0x9A, 0xFF, 0xFF, 0x97, 0x80, 0x00, 0x00, 0x36};
                 u8 sha2Pattern[] = {0x81, 0x00, 0x80, 0x72, 0x3C, 0xFC, 0xFF, 0x97};
-                ver_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern));
-                pk21_ptr = (uPtr*)((u32)ver_ptr - 0xC);
                 hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
+                break;
+            }
+        }
+        
+        //Sha2
+        switch(fw) {
+            //case KB_FIRMWARE_VERSION_100:
+            case KB_FIRMWARE_VERSION_200: {
+                u8 sha2Pattern[] = {0xE0, 0x03, 0x08, 0x91, 0xE1, 0x03, 0x13, 0xAA};
+                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x10);
+                break;
+            }
+            case KB_FIRMWARE_VERSION_300:
+            case KB_FIRMWARE_VERSION_301: {
+                u8 sha2Pattern[] = {0x07, 0xFF, 0xFF, 0x97, 0xC0, 0x18, 0x00, 0x36};
                 sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x4);
+                break;
+            }
+            case KB_FIRMWARE_VERSION_400: {
+                u8 sha2Pattern[] = {0xD3, 0xD5, 0xFF, 0x97, 0xE0, 0x03, 0x01, 0x32};
+                sha2_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern));
+                break;
+            }
+            case KB_FIRMWARE_VERSION_500: {
+                u8 sha2Pattern[] = {0xF2, 0xFB, 0xFF, 0x97, 0xE0, 0x03};
+                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)));
+                break;
+            }
+            default:{
+                u8 sha2Pattern[] = {0x81, 0x00, 0x80, 0x72, 0x3C, 0xFC, 0xFF, 0x97};
+                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x4);
+                break;
+            }
+        }
+        
+        //Pkg2
+        switch(fw) {
+            //case KB_FIRMWARE_VERSION_100:
+            case KB_FIRMWARE_VERSION_200: break;
+            case KB_FIRMWARE_VERSION_300:
+            case KB_FIRMWARE_VERSION_301: {
+                u8 pk21Pattern[] = {0x40, 0x19, 0x00, 0x36, 0xE0, 0x03, 0x08, 0x91};
+                pk21_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, pk21Pattern, sizeof(pk21Pattern));
+                break;
+            }
+            case KB_FIRMWARE_VERSION_400: {
+                u8 pk21Pattern[] = {0xE0, 0x00, 0x00, 0x36, 0xE0, 0x03, 0x13, 0xAA, 0x63};
+                pk21_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, pk21Pattern, sizeof(pk21Pattern));
+                break;
+            }
+            default:{
+                pk21_ptr = (uPtr*)((u32)ver_ptr - 0xC);
                 break;
             }
         }
 
         if (fw > KB_FIRMWARE_VERSION_200) {
-            *pk21_ptr = NOP;
+            *pk21_ptr = NOP_v8;
         };
-        *ver_ptr = NOP;
-        *hdrsig_ptr = NOP;
-        *sha2_ptr = NOP;
+        *ver_ptr = NOP_v8;
+        *hdrsig_ptr = NOP_v8;
+        *sha2_ptr = NOP_v8;
     }
 }
 
@@ -184,7 +240,7 @@ void patchKernel(pkg2_hdr_t *pkg2){
     if(!customKern) {
         u32 crc = crc32c(pkg2->data, pkg2->sec_size[PKG2_SEC_KERNEL]);
         uPtr kern = (uPtr)&pkg2->data;
-        uPtr sendOff, recvOff, codeRcvOff, codeSndOff, svcVerifOff, svcDebugOff, ver, peek, poke;
+        uPtr sendOff, recvOff, codeRcvOff, codeSndOff, svcVerifOff, svcDebugOff, ver;
         switch(crc){
             case 0x427f2647:{   //1.0.0
                 svcVerifOff = 0x3764C;
@@ -243,8 +299,6 @@ void patchKernel(pkg2_hdr_t *pkg2){
                 recvOff = 0x28DAC;
                 codeSndOff = 8;
                 codeRcvOff = 8;
-                peek = 0x42D3C;
-                poke = 0x42E00;
                 ver = 5;
                 break;
             }
@@ -255,8 +309,6 @@ void patchKernel(pkg2_hdr_t *pkg2){
                 recvOff = 0x29B6C;
                 codeSndOff = 0x10;
                 codeRcvOff = 0x10;
-                peek = 0x44E84;
-                poke = 0x44F48;
                 ver = 6;
                 break;
             }
@@ -282,14 +334,10 @@ void patchKernel(pkg2_hdr_t *pkg2){
         *(vu32*)(kern + freeSpace + payloadSize) = _B(freeSpace + payloadSize, recvOff + codeRcvOff);
 
         //SVC patches
-        *(vu32*)(kern + svcVerifOff) = NOP;
+        *(vu32*)(kern + svcVerifOff) = NOP_v8;
         if (fopen("/ReiNX/debug", "rb")) {
             fclose();
             *(vu32*)(kern + svcDebugOff) = _MOVZX(8, 1, 0);
-        }
-        if(peek && poke) {
-            memcpy((void*)(kern + peek), peekPayload, sizeof(peekPayload));
-            memcpy((void*)(kern + poke), pokePayload, sizeof(pokePayload));
         }
 
         end:;
@@ -304,7 +352,7 @@ void patchKernelExtensions(link_t *kips){
     } else {
         patchFS(FS_module);
     }
-    
+
     // Load all KIPs.
     char **sysmods = NULL;
     size_t cnt = enumerateDir(&sysmods, "/ReiNX/sysmodules", "*.kip");
@@ -353,7 +401,7 @@ u8 loadFirm() {
     //Decrypt if needed
     if(pk11Offs->kb < KB_FIRMWARE_VERSION_620)
       se_aes_crypt_ctr(11, pkg11 + 0x20, pkg11_size, pkg11 + 0x20, pkg11_size, pkg11 + 0x10);
-  
+
     print("Unpacking pkg1\n");
     pkg1_unpack(pk11Offs, (u32)pkg11);
     PMC(APBDEV_PMC_SCRATCH1) = pk11Offs->warmboot_base;
@@ -361,7 +409,7 @@ u8 loadFirm() {
 
     //Read package2
     u8 *pkg2 = ReadPackage2(&storage);
-    
+
     // Unpack Package2.
     print("Unpacking package2...\n");
     pkg2_hdr_t *dec_pkg2 = unpackFirmwarePackage(pkg2);
@@ -369,13 +417,14 @@ u8 loadFirm() {
     pkg2_parse_kips(&kip1_info, dec_pkg2);
 
     // Patch firmware.
+    patchWarmboot(pk11Offs->warmboot_base);
     patchSecmon(pk11Offs->secmon_base, pk11Offs->kb);
     patchKernel(dec_pkg2);
     patchKernelExtensions(&kip1_info);
-    
+
     // Build Package2.
     buildFirmwarePackage(dec_pkg2->data, dec_pkg2->sec_size[PKG2_SEC_KERNEL], &kip1_info);
-    
+
     //We're done with SD now
     sdUnmount();
 }
@@ -416,7 +465,7 @@ void launch() {
             se_key_acc_ctrl(12, 0xFF);
             se_key_acc_ctrl(15, 0xFF);
     }
-    
+
     if(pk11Offs->kb < KB_FIRMWARE_VERSION_620){
         SE_lock();
     }else{
@@ -444,26 +493,26 @@ void launch() {
 
     // Disable display.
     display_end();
-    
+
     // Boot secmon and Wait for it get ready, if aplicable.
     if (smmu_is_used())
         smmu_exit();
     else
         cluster_boot_cpu0(pk11Offs->secmon_base);
-    
+
     while (!*SECMON_STATE_ADDR)
         usleep(1);
 
     // Signal to finish boot process.
     *BOOT_STATE_ADDR = (pk11Offs->kb < KB_FIRMWARE_VERSION_400 ? BOOT_DONE : BOOT_DONE_4X);
-    
+
     // Halt ourselves in waitevent state.
     while (1) FLOW_CTLR(0x4) = 0x50000000;
 }
 
 void firmware() {
     display_init();
-    gfx_init_ctxt(&gfx_ctxt, display_init_framebuffer(), 720, 1280, 768);
+    gfx_init_ctxt(&gfx_ctxt, display_init_framebuffer(), 1280, 720, 768);
     gfx_clear_color(&gfx_ctxt, 0xFF000000);
     gfx_con_init(&gfx_con, &gfx_ctxt);
     gfx_con_setcol(&gfx_con, DEFAULT_TEXT_COL, 0, 0);
@@ -488,11 +537,17 @@ void firmware() {
     }
     SYSREG(AHB_AHB_SPARE_REG) = (volatile vu32)0xFFFFFF9F;
     PMC(APBDEV_PMC_SCRATCH49) = 0;
-
+    
     if(btn_read() & BTN_VOL_UP){
         if(fopen("/ReiNX/Recovery.bin", "rb") != 0) {
             fread((void*)PAYLOAD_ADDR, fsize(), 1);
             fclose();
+            if(!fopen("/ReiNX.bin", "rb")) {
+                memcpy((void *)0x82000000, (void *)0x40008000, 0x1ed58);
+            } else {
+                PMC(APBDEV_PMC_SCRATCH49) = 69;
+                fclose();
+            }
             sdUnmount();
             CLOCK(CLK_RST_CONTROLLER_CLK_OUT_ENB_V) |= 0x400; // Enable AHUB clock.
             CLOCK(CLK_RST_CONTROLLER_CLK_OUT_ENB_Y) |= 0x40;  // Enable APE clock.
@@ -502,7 +557,7 @@ void firmware() {
             btn_wait();
         }
     }
-    
+
     if (btn_read() & BTN_VOL_DOWN) {
         print("Booting verbosely\n");
     } else if (drawSplash()) {

@@ -52,7 +52,7 @@ $(dir_out)/sysmodules: $(dir_sysmod)
 	@cp $(dir_sysmod)/loader/loader.kip $(dir_out)/ReiNX/sysmodules/
 	@cp $(dir_sysmod)/sm/sm.kip $(dir_out)/ReiNX/sysmodules/
 	@cp $(dir_sysmod)/pm/pm.kip $(dir_out)/ReiNX/sysmodules/
-	@cp $(dir_sysmod)/fs_mitm/fs_mitm.kip $(dir_out)/ReiNX/sysmodules.dis/
+	@cp $(dir_sysmod)/fs_mitm/fs_mitm.kip $(dir_out)/ReiNX/sysmodules/
 
 $(dir_out)/$(name).bin: $(dir_build)/$(name).elf
 	@mkdir -p "$(@D)"
@@ -71,3 +71,4 @@ $(dir_build)/%.o: $(dir_source)/%.c
 $(dir_build)/%.o: $(dir_source)/%.s
 	@mkdir -p "$(@D)"
 	$(CC) $(CFLAGS) -c $< -o $@
+
