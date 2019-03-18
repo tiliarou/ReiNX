@@ -119,13 +119,18 @@ void pkg1_unpack(pk11_offs *offs, u32 pkg1Off) {
         if (offs->sec_map[i] == 0 && offs->warmboot_base) {
             size_t extSize = 0;
             u8 *extWb = LoadExtFile("/ReiNX/warmboot.bin", &extSize);
-            if(offs->kb < KB_FIRMWARE_VERSION_700)
-                memcpy((void *)offs->warmboot_base, extWb == NULL ? pdata : extWb, extWb == NULL ? sec_size[offs->sec_map[i]] : extSize);
+            if(extWb == NULL) extWb = LoadExtFile("/ReiNX/lp0fw.bin", &extSize);
+            if(offs->kb >= KB_FIRMWARE_VERSION_700 && extWb == NULL)
+                error("Custom warmboot required!");
+            memcpy((void *)offs->warmboot_base, extWb == NULL ? pdata : extWb, extWb == NULL ? sec_size[offs->sec_map[i]] : extSize);
             free(extWb);
         }
         if (offs->sec_map[i] == 2 && offs->secmon_base) {
             size_t extSize = 0;
             u8 *extSec = LoadExtFile("/ReiNX/secmon.bin", &extSize);
+            if(extSec == NULL) extSec = LoadExtFile("/ReiNX/exosphere.bin", &extSize);
+            if(offs->kb >= KB_FIRMWARE_VERSION_700 && extSec == NULL)
+                error("Custom secmon required!");
             memcpy((u8 *)offs->secmon_base, extSec == NULL ? pdata : extSec, extSec == NULL ? sec_size[offs->sec_map[i]] : extSize);
             free(extSec);
         }
@@ -139,12 +144,20 @@ bool hasCustomWb() {
         ret = true;
         fclose();
     }
+    if(fopen("/ReiNX/lp0fw.bin", "rb") != 0) {
+        ret = true;
+        fclose();
+    }
     return ret;
 }
 
 bool hasCustomSecmon() {
     bool ret = false;
     if(fopen("/ReiNX/secmon.bin", "rb") != 0) {
+        ret = true;
+        fclose();
+    }
+    if(fopen("/ReiNX/exosphere.bin", "rb") != 0) {
         ret = true;
         fclose();
     }
@@ -162,7 +175,7 @@ bool hasCustomKern() {
 
 void buildFirmwarePackage(u8 *kernel, u32 kernel_size, link_t *kips_info) {
     u8 *pdst = (u8 *)0xA9800000;
-	bool hasCustSecmon = hasCustomSecmon();
+    bool hasCustSecmon = hasCustomSecmon();
 
     // Signature.
     memset(pdst, 0, 0x100);
@@ -182,7 +195,7 @@ void buildFirmwarePackage(u8 *kernel, u32 kernel_size, link_t *kips_info) {
     memcpy(pdst, extKern == NULL ? kernel : extKern, extKern == NULL ? kernel_size : extSize);
     hdr->sec_size[PKG2_SEC_KERNEL] = kernel_size;
     hdr->sec_off[PKG2_SEC_KERNEL] = 0x10000000;
-	if(!hasCustSecmon)
+    if(!hasCustSecmon)
         se_aes_crypt_ctr(8, pdst, kernel_size, pdst, kernel_size, &hdr->sec_ctr[PKG2_SEC_KERNEL * 0x10]);
     pdst += kernel_size;
 
@@ -202,13 +215,13 @@ void buildFirmwarePackage(u8 *kernel, u32 kernel_size, link_t *kips_info) {
     ini1->size = ini1_size;
     hdr->sec_size[PKG2_SEC_INI1] = ini1_size;
     hdr->sec_off[PKG2_SEC_INI1] = 0x14080000;
-	if (!hasCustSecmon)
+    if (!hasCustSecmon)
         se_aes_crypt_ctr(8, ini1, ini1_size, ini1, ini1_size, &hdr->sec_ctr[PKG2_SEC_INI1 * 0x10]);
 
     // Encrypt header.
     *(u32 *)hdr->ctr = 0x100 + sizeof(pkg2_hdr_t) + kernel_size + ini1_size;
     if (!hasCustSecmon)
-		se_aes_crypt_ctr(8, hdr, sizeof(pkg2_hdr_t), hdr, sizeof(pkg2_hdr_t), hdr);
+        se_aes_crypt_ctr(8, hdr, sizeof(pkg2_hdr_t), hdr, sizeof(pkg2_hdr_t), hdr);
     memset(hdr->ctr, 0 , 0x10);
     *(u32 *)hdr->ctr = 0x100 + sizeof(pkg2_hdr_t) + kernel_size + ini1_size;
 }
