@@ -41,7 +41,7 @@ void gfx_con_init(gfx_con_t *con, gfx_ctxt_t *ctxt)
 	con->fgcol = 0xFFCCCCCC;
 	con->fillbg = 0;
 	con->bgcol = 0;
-	con->mute = 0;
+	con->mute = 1;
 }
 
 /*
@@ -71,7 +71,7 @@ void gfx_con_setpos(gfx_con_t *con, u32 x, u32 y)
 */
 void gfx_set_pixel(gfx_ctxt_t *ctxt, u32 x, u32 y, u32 color)
 {
-    ctxt->fb[y + (ctxt->width - x) * ctxt->stride] = color;
+    ctxt->fb[y + x * ctxt->stride] = color;
 }
 
 void gfx_clear_color(gfx_ctxt_t *ctxt, u32 color)
@@ -91,8 +91,10 @@ void gfx_putc(gfx_con_t *con, char c)
             u8 v = *cbuf++;
             for (u32 j = 0; j < 8; j++)
             {
-                if (v & 1) gfx_set_pixel(con->gfx_ctxt, con->x + j, con->y + i, con->fgcol);
-                else if (con->fillbg) gfx_set_pixel(con->gfx_ctxt, con->x + j, con->y + i, con->bgcol);
+                if (v & 1) 
+                    gfx_set_pixel(con->gfx_ctxt, con->x + j, con->y + i, con->fgcol);
+                else if (con->fillbg) 
+                    gfx_set_pixel(con->gfx_ctxt, con->x + j, con->y + i, con->bgcol);
                 v >>= 1;
             }
         }
@@ -194,8 +196,9 @@ void gfx_printf(gfx_con_t *con, const char *fmt, ...)
                 default: { gfx_putc(con, '%'); gfx_putc(con, *fmt); break; }
 			}
 		}
-		else
+		else {
 			gfx_putc(con, *fmt);
+        }
 		fmt++;
 	}
 
@@ -203,7 +206,7 @@ void gfx_printf(gfx_con_t *con, const char *fmt, ...)
 	va_end(ap);
 }
 
-void gfx_hexdump(gfx_con_t *con, u32 base, const u8 *buf, u32 len)
+void gfx_hexdump(gfx_con_t *con, const u8 *buf, u32 len)
 {
 	if (con->mute)
 		return;
@@ -225,7 +228,7 @@ void gfx_hexdump(gfx_con_t *con, u32 base, const u8 *buf, u32 len)
 				}
 				gfx_putc(con, '\n');
 			}
-			gfx_printf(con, "%08x: ", base + i);
+			gfx_printf(con, "%08x: ", &buf + i);
 		}
 		gfx_printf(con, "%02x ", buf[i]);
 		if (i == len - 1)
@@ -251,4 +254,15 @@ void gfx_hexdump(gfx_con_t *con, u32 base, const u8 *buf, u32 len)
 		}
 	}
 	gfx_putc(con, '\n');
+}
+
+void gfx_load_splash(const u32 *buf)
+{
+    u32 width = 1280, height = 720;
+    u32 x,y;
+    u32 i = 0;
+    for (x = 0; x < width; x++)
+        for (y = 0; y < height; y++){
+			gfx_ctxt.fb[y + x * gfx_ctxt.stride] = (u32*)buf[(((height-1) - y ) * width + x)];
+        }
 }

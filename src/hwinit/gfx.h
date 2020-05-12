@@ -21,11 +21,11 @@
 
 #include "types.h"
 
-#define RED 0xFF0000FF
+#define RED 0xFFFF0000
 #define GREEN 0xFF00FF00
-#define BLUE 0xFFFF0000
-#define YELLOW 0xFF00FFFF
-#define ORANGE 0xFF3891FF
+#define BLUE 0xFF0000FF
+#define YELLOW 0xFFFFFF00
+#define ORANGE 0xFFFF9138
 #define WHITE 0xFFFFFFFF
 #define BLACK 0xFF000000
 
@@ -127,6 +127,13 @@ static const u8 _gfx_font[] = {
 	0x00, 0x00, 0x00, 0x4C, 0x32, 0x00, 0x00, 0x00  // Char 126 (~)
 };
 
+typedef struct {
+    u16 magic;
+    u32 fileSize;
+    u32 padding;
+    u32 offset;
+} BitmapHeader;
+
 typedef struct _gfx_ctxt_t
 {
 	u32 *fb;
@@ -162,8 +169,8 @@ void gfx_con_setpos(gfx_con_t *con, u32 x, u32 y);
 void gfx_putc(gfx_con_t *con, char c);
 void gfx_puts(gfx_con_t *con, const char *s);
 void gfx_printf(gfx_con_t *con, const char *fmt, ...);
-void gfx_hexdump(gfx_con_t *con, u32 base, const u8 *buf, u32 len);
-
+void gfx_hexdump(gfx_con_t *con, const u8 *buf, u32 len);
+void gfx_load_splash(const u32 *buf);
 void gfx_set_pixel(gfx_ctxt_t *ctxt, u32 x, u32 y, u32 color);
 
 #endif

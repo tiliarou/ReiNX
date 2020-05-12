@@ -33,6 +33,7 @@
 #include "hwinit/util.h"
 #include "hwinit/tsec.h"
 #include "hwinit/kfuse.h"
+#include "hwinit/fuse.h"
 #include "hwinit/max77620.h"
 #include "hwinit/max7762x.h"
 #include "hwinit/gpio.h"
@@ -45,5 +46,7 @@
 #include "hwinit/mmc.h"
 #include "hwinit/gfx.h"
 #include "hwinit/smmu.h"
+#include "hwinit/types.h"
+#include "hwinit/aarch64_util.h"
 
 #define DEFAULT_TEXT_COL ORANGE

@@ -15,7 +15,17 @@
 */
 #pragma once
 
-#include "hwinit/types.h"
+#include <string.h>
+#include <stddef.h>
+#include "hwinit.h"
+#include "fs.h"
+#include "package.h"
+#include "error.h"
+#include "bootloader.h"
+#include "patches.h"
+#include "secmon.h"
+#include "sept.h"
+#include "hwinit/di.h"
 
 //Boot status
 #define BOOT_STATE_ADDR (vu32 *)0x40002EF8

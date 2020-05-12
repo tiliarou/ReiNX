@@ -1,28 +1,26 @@
 ENTRY(_start)
 
-SECTIONS 
+SECTIONS
 {
 	PROVIDE(__payload_start = 0x40008000);
     PROVIDE(__heap_start = 0x90020000);
     PROVIDE(__stack_start = 0x90010000);
-    
+
 	. = __payload_start;
-	.text.start : 
-	{ 
-		*(.text.start)
-	}
-	.text : 
+	.text :
 	{
+		*(.text.start);
+		*(.metadata);
 		*(.text*);
 	}
-	.data : 
+	.data :
 	{
 		*(.data*);
 		*(.rodata*);
 	}
 	. = ALIGN(0x10);
 	__payload_end = .;
-	.bss : 
+	.bss :
 	{
 		__bss_start = .;
 		*(COMMON)

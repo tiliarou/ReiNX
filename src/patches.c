@@ -17,8 +17,7 @@
 #include "patches.h"
 
 void patchFS(pkg2_kip1_info_t* ki) {
-
-    print("Patching FS\n");
+    print("%kPatching FS%k\n", WHITE, DEFAULT_TEXT_COL);
 
     u8 kipHash[0x20];
 
@@ -34,7 +33,10 @@ void patchFS(pkg2_kip1_info_t* ki) {
 
     u32 pos = 0;
     //Get decomp .text segment
-    u8 *kipDecompText = blz_decompress(moddedKip->data, moddedKip->sections[0].size_comp);
+
+    u8 *kipDecompText = malloc(moddedKip->sections[0].size_decomp);
+    if (!blz_uncompress_srcdest(moddedKip->data, moddedKip->sections[0].size_comp, kipDecompText, moddedKip->sections[0].size_decomp))
+        while(1);
 
     kippatchset_t *pset = kippatch_find_set(kipHash, kip_patches);
     if (!pset) {
@@ -62,185 +64,50 @@ void patchFS(pkg2_kip1_info_t* ki) {
     ki->kip1 = moddedKip;
 }
 
-void patchWarmboot(u32 warmbootBase) {
-    //Patch warmboot
-    if(!hasCustomWb()) {
-        print("Patching Warmboot...\n");
-        uPtr *fuseCheck = NULL;
-        uPtr *segmentID = NULL;
-        u8 fuseCheckPat[] = {0x44, 0x12, 0x80, 0xE5};
-        u8 segmentIDPat[] = {0x60, 0x03, 0x91, 0xE5};
-        fuseCheck = (uPtr*)(memsearch((void *)warmbootBase, 0x1000, fuseCheckPat, sizeof(fuseCheckPat)) + 20);
-        segmentID = (uPtr*)(memsearch((void *)warmbootBase, 0x1000, segmentIDPat, sizeof(segmentIDPat)) + 12);
-
-        *fuseCheck = NOP_v7;
-        if(segmentID != NULL)
-            *segmentID = NOP_v7;
-    }else{
-        print("Using custom warmboot.\n");
-    }
-}
-
-void patchSecmon(u32 secmonBase, u32 fw){
-    //Patch Secmon
-    if(!hasCustomSecmon()){
-        print("Patching Secmon...\n");
-        uPtr *rlc_ptr = NULL;
-        uPtr *ver_ptr = NULL;
-        uPtr *pk21_ptr = NULL;
-        uPtr *hdrsig_ptr = NULL;
-        uPtr *sha2_ptr = NULL;
-
-        //Version
-        switch(fw) {
-            //case KB_FIRMWARE_VERSION_100:
-            case KB_FIRMWARE_VERSION_200: {
-                u8 verPattern[] = {0x19, 0x00, 0x36, 0xE0, 0x03, 0x08, 0x91};
-                ver_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern)) + 0xB);
-                break;
-            }
-            case KB_FIRMWARE_VERSION_300:
-            case KB_FIRMWARE_VERSION_301: {
-                u8 verPattern[] = {0x2B, 0xFF, 0xFF, 0x97, 0x40, 0x19, 0x00, 0x36};
-                ver_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern)) + 0x4);
-                break;
-            }
-            case KB_FIRMWARE_VERSION_400: {
-                u8 verPattern[] = {0x00, 0x01, 0x00, 0x36, 0xFD, 0x7B, 0x41, 0xA9};
-                ver_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern));
-                break;
-            }
-            default:{
-                u8 verPattern[] = {0x00, 0x01, 0x00, 0x36, 0xFD, 0x7B, 0x41, 0xA9};
-                ver_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, verPattern, sizeof(verPattern));
-                break;
-            }
-        }
-
-        //header sig
-        switch(fw) {
-            //case KB_FIRMWARE_VERSION_100:
-            case KB_FIRMWARE_VERSION_200: {
-                u8 hdrSigPattern[] = {0xFF, 0x97, 0xC0, 0x00, 0x00, 0x34, 0xA1, 0xFF, 0xFF};
-                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x3A);
-                break;
-            }
-            case KB_FIRMWARE_VERSION_300:
-            case KB_FIRMWARE_VERSION_301: {
-                u8 hdrSigPattern[] = {0xF7, 0xFE, 0xFF, 0x97, 0x80, 0x1E, 0x00, 0x36};
-                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
-                break;
-            }
-            case KB_FIRMWARE_VERSION_400: {
-                u8 hdrSigPattern[] = {0xE0, 0x03, 0x13, 0xAA, 0x4B, 0x28, 0x00, 0x94};
-                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x8);
-                break;
-            }
-            case KB_FIRMWARE_VERSION_500: {
-                u8 hdrSigPattern[] = {0x86, 0xFE, 0xFF, 0x97, 0x80, 0x00, 0x00, 0x36};
-                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
-                break;
-            }
-            default:{
-                u8 hdrSigPattern[] = {0x9A, 0xFF, 0xFF, 0x97, 0x80, 0x00, 0x00, 0x36};
-                hdrsig_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, hdrSigPattern, sizeof(hdrSigPattern)) + 0x4);
-                break;
-            }
-        }
-
-        //Sha2
-        switch(fw) {
-            //case KB_FIRMWARE_VERSION_100:
-            case KB_FIRMWARE_VERSION_200: {
-                u8 sha2Pattern[] = {0xE0, 0x03, 0x08, 0x91, 0xE1, 0x03, 0x13, 0xAA};
-                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x10);
-                break;
-            }
-            case KB_FIRMWARE_VERSION_300:
-            case KB_FIRMWARE_VERSION_301: {
-                u8 sha2Pattern[] = {0x07, 0xFF, 0xFF, 0x97, 0xC0, 0x18, 0x00, 0x36};
-                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x4);
-                break;
-            }
-            case KB_FIRMWARE_VERSION_400: {
-                u8 sha2Pattern[] = {0xD3, 0xD5, 0xFF, 0x97, 0xE0, 0x03, 0x01, 0x32};
-                sha2_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern));
-                break;
-            }
-            case KB_FIRMWARE_VERSION_500: {
-                u8 sha2Pattern[] = {0xF2, 0xFB, 0xFF, 0x97, 0xE0, 0x03};
-                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)));
-                break;
-            }
-            case KB_FIRMWARE_VERSION_600: {
-                u8 sha2Pattern[] = {0x81, 0x00, 0x80, 0x72, 0xB5, 0xFB, 0xFF, 0x97};
-                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x4);
-                break;
-            }
-            default:{
-                u8 sha2Pattern[] = {0x81, 0x00, 0x80, 0x72, 0x3C, 0xFC, 0xFF, 0x97};
-                sha2_ptr = (uPtr*)(memsearch((void *)secmonBase, 0x10000, sha2Pattern, sizeof(sha2Pattern)) + 0x4);
-                break;
-            }
-        }
-
-        //Pkg2
-        switch(fw) {
-            //case KB_FIRMWARE_VERSION_100:
-            case KB_FIRMWARE_VERSION_200: break;
-            case KB_FIRMWARE_VERSION_300:
-            case KB_FIRMWARE_VERSION_301: {
-                u8 pk21Pattern[] = {0x40, 0x19, 0x00, 0x36, 0xE0, 0x03, 0x08, 0x91};
-                pk21_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, pk21Pattern, sizeof(pk21Pattern));
-                break;
-            }
-            case KB_FIRMWARE_VERSION_400: {
-                u8 pk21Pattern[] = {0xE0, 0x00, 0x00, 0x36, 0xE0, 0x03, 0x13, 0xAA, 0x63};
-                pk21_ptr = (uPtr*)memsearch((void *)secmonBase, 0x10000, pk21Pattern, sizeof(pk21Pattern));
-                break;
-            }
-            default:{
-                pk21_ptr = (uPtr*)((u32)ver_ptr - 0xC);
-                break;
-            }
-        }
-
-        if (fw > KB_FIRMWARE_VERSION_200) {
-            *pk21_ptr = NOP_v8;
-        };
-        *ver_ptr = NOP_v8;
-        *hdrsig_ptr = NOP_v8;
-        *sha2_ptr = NOP_v8;
-    }else{
-        print("Using custom secmon.\n");
-    }
-}
-
-void patchKernel(pkg2_hdr_t *pkg2){
+void patchKernel(pkg2_hdr_t *pkg2, u8 fwVer){
     //Patch Kernel
     if(!hasCustomKern()) {
-        print("Patching Kernel...\n");
+        print("%kPatching Kernel...%k\n", WHITE, DEFAULT_TEXT_COL);
         u8 hash[0x20];
-        se_calc_sha256(hash, pkg2->data, pkg2->sec_size[PKG2_SEC_KERNEL]);
+        if(!pkg2->sec_size[PKG2_SEC_INI1]) {
+            se_calc_sha256(hash, (void*)(pkg2->data + PKG2_NEWKERN_START), GetNewKernIniStart() - PKG2_NEWKERN_START); //TODO unhardcode
+            //*((vu64 *)((uPtr)pkg2->data + 0x168)) = (u64)pkg2->sec_size[PKG2_SEC_KERNEL];
+            printHex((void*)hash, 0x20);
+        }else{
+            se_calc_sha256(hash, pkg2->data, pkg2->sec_size[PKG2_SEC_KERNEL]);
+        }
         uPtr kern = (uPtr)&pkg2->data;
         uPtr sendOff, recvOff, codeRcvOff, codeSndOff, svcVerifOff, svcDebugOff;
-
+        
+        bool foundKern = false;
         int i; for(i = 0; i < sizeof(kernelInfo)/sizeof(KernelMeta); i++) {
-            if(memcmp(hash, kernelInfo[i].Hash, 0x20)) continue;
+            if(memcmp(hash, kernelInfo[i].Hash, 8)) continue;
             print("Patching kernel %d\n", i);
-
+            foundKern = true;
+            print("Svc verify off: 0x%08X\n", kernelInfo[i].SvcVerify);
+            print("Svc debug off: 0x%08X\n", kernelInfo[i].SvcDebug);
+            print("Kernel ipc send hook off: 0x%08X\n", kernelInfo[i].SendOff);
+            print("Kernel ipc recv hook off: 0x%08X\n", kernelInfo[i].RcvOff);
+            print("Generic off: 0x%08X\n", kernelInfo[i].GenericOff);
+            print("Kernel ipc send payload off: 0x%08X\n", kernelInfo[i].CodeSndOff);
+            print("Kernel ipc recv payload off: 0x%08X\n", kernelInfo[i].CodeRcvOff);
+            print("Kernel Freespace: 0x%08X\n", kernelInfo[i].Freespace);
+            print("Kernel SYSM_INCR: 0x%08X\n", kernelInfo[i].SYSM_INCR);
+            
+            //Find free space
+            u32 freeSpace = kernelInfo[i].Freespace;//getFreeSpace((void*)(kern+0x45000), 0x200, 0x20000) + 0x45000; 
+            
             //ID Send
-            uPtr freeSpace = getFreeSpace((void*)(kern+0x45000), 0x200, 0x20000) + 0x45000;     //Find area to write payload
-            print("Kernel Freespace: 0x%08X\n", freeSpace);
-            size_t payloadSize;
-            u32 *sndPayload = getSndPayload(i, &payloadSize);
+            size_t payloadSize = kernelInfo[i].SndPayloadSize;
+            u32 *sndPayload = kernelInfo[i].SndPayload;
             *(vu32*)(kern + kernelInfo[i].SendOff) = _B(kernelInfo[i].SendOff, freeSpace);      //write hook to payload
-            memcpy((void*)(kern + freeSpace), sndPayload, payloadSize);                         //Copy payload to free space
+            memcpy((void*)(kern + freeSpace), kernelInfo[i].SndPayload, payloadSize);                         //Copy payload to free space
             *(vu32*)(kern + freeSpace + payloadSize) = _B(freeSpace + payloadSize, kernelInfo[i].SendOff + kernelInfo[i].CodeSndOff);  //Jump back skipping the hook
 
             //ID Receive
             freeSpace += (payloadSize+4);
-            u32 *rcvPayload = getRcvPayload(i, &payloadSize);
+            payloadSize = kernelInfo[i].RcvPayloadSize;
+            u32 *rcvPayload = kernelInfo[i].RcvPayload;
             *(vu32*)(kern + kernelInfo[i].RcvOff) = _B(kernelInfo[i].RcvOff, freeSpace);
             memcpy((void*)(kern + freeSpace), rcvPayload, payloadSize);
             *(vu32*)(kern + freeSpace + payloadSize) = _B(freeSpace + payloadSize, kernelInfo[i].RcvOff + kernelInfo[i].CodeRcvOff);
@@ -252,10 +119,33 @@ void patchKernel(pkg2_hdr_t *pkg2){
                 *(vu32*)(kern + kernelInfo[i].SvcDebug) = _MOVZX(8, 1, 0);
             }
 
+            //SYSM_INCR patches
+            switch(fwVer){
+                case HOS_FIRMWARE_VERSION_500:
+                    *(vu32*)(kern + kernelInfo[i].SYSM_INCR) = _MOVZW(8, 0x1E00, LSL16);
+                    break;
+                case HOS_FIRMWARE_VERSION_600:
+                case HOS_FIRMWARE_VERSION_620:
+                case HOS_FIRMWARE_VERSION_700:
+                    *(vu32*)(kern + kernelInfo[i].SYSM_INCR) = _MOVZW(8, 0x1D80, LSL16);
+                    break;
+                case HOS_FIRMWARE_VERSION_800:
+                case HOS_FIRMWARE_VERSION_810:
+                case HOS_FIRMWARE_VERSION_900:
+                case HOS_FIRMWARE_VERSION_910:
+                case HOS_FIRMWARE_VERSION_1000:
+                    *(vu32*)(kern + kernelInfo[i].SYSM_INCR) = _MOVZW(19, 0x1D80, LSL16);
+                    break;
+            }
+
             //JIT patches
             *(vu32*)(kern + kernelInfo[i].GenericOff) = NOP_v8;
 
             break;
+        }
+        if(!foundKern) {
+            error("\nKernel hash doesnt match list!\n");
+            printHex((void*)kernelInfo[i].Hash, 0x20);
         }
     }else{
         print("Using custom kernel.\n");
@@ -263,7 +153,7 @@ void patchKernel(pkg2_hdr_t *pkg2){
 }
 
 void patchKernelExtensions(link_t *kips){
-    print("Patching KIPs...\n");
+    print("%kPatching KIPs...%k\n", WHITE, DEFAULT_TEXT_COL);
     pkg2_kip1_info_t* FS_module = find_by_tid(kips, 0x0100000000000000);
     if(FS_module == NULL) {
         error("Could not find FS Module.\n");
